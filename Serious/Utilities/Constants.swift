@@ -1,0 +1,19 @@
+import Foundation
+
+enum Constants {
+    static let defaultWindowWidth: CGFloat = 600
+    static let defaultWindowHeight: CGFloat = 300
+    static let windowCornerRadius: CGFloat = 12
+    static let windowBackgroundOpacity: Double = 0.85
+    static let menuBarTopOffset: CGFloat = 28
+
+    static let searchWindowBack: Int = 3
+    static let searchWindowAhead: Int = 15
+    static let defaultMatchThreshold: Double = 0.7
+    static let defaultSilenceTimeout: TimeInterval = 2.0
+
+    static let sfSpeechSessionLimit: TimeInterval = 55
+
+    static let scriptsDirectoryName = "scripts"
+    static let appSupportSubdirectory = "Serious"
+}
