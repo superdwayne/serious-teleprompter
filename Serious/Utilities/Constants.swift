@@ -12,6 +12,10 @@ enum Constants {
     static let defaultMatchThreshold: Double = 0.7
     static let defaultSilenceTimeout: TimeInterval = 2.0
 
+    static let minWordsForMatch: Int = 2
+    static let maxStepForward: Int = 5
+    static let confirmationsRequired: Int = 2
+
     static let sfSpeechSessionLimit: TimeInterval = 55
 
     static let scriptsDirectoryName = "scripts"

@@ -5,11 +5,14 @@ final class WordMatcher {
     var currentPosition: Int = 0
     private var scriptWords: [ScriptWord] = []
     private var sensitivity: Double = 0.7
+    private var candidatePosition: Int?
+    private var candidateHits: Int = 0
 
     func configure(script: Script, sensitivity: Double) {
         self.scriptWords = script.words
         self.sensitivity = sensitivity
         self.currentPosition = 0
+        resetCandidate()
     }
 
     func processTranscription(_ result: TranscriptionResult) -> Int? {
@@ -17,44 +20,69 @@ final class WordMatcher {
         let spokenWords = result.words
             .map { $0.normalizedForMatching }
             .filter { !$0.isEmpty }
-        guard !spokenWords.isEmpty else { return nil }
+
+        // Require minimum spoken words to avoid unreliable single-word
+        // matches after speech-session restarts or at transcription start
+        guard spokenWords.count >= Constants.minWordsForMatch else { return nil }
 
         let windowStart = max(0, currentPosition - Constants.searchWindowBack)
         let windowEnd = min(scriptWords.count - 1, currentPosition + Constants.searchWindowAhead)
         guard windowStart <= windowEnd else { return nil }
 
-        var bestMatchIndex = currentPosition
+        var bestMatchIndex: Int?
         var bestScore: Double = 0.0
 
-        let lastSpoken = spokenWords.last!
-
-        for i in windowStart...windowEnd {
-            let scriptWord = scriptWords[i].normalized
-            let score = StringSimilarity.normalizedSimilarity(lastSpoken, scriptWord)
-
-            if score > bestScore && score >= sensitivity {
-                bestScore = score
-                bestMatchIndex = i
-            }
-        }
-
+        // ── 1) Phrase matching (primary — most reliable) ──
         if spokenWords.count >= 2 {
-            let phraseScore = matchPhrase(spokenWords: spokenWords, startingNear: currentPosition)
-            if let phraseResult = phraseScore, phraseResult.score >= bestScore {
+            if let phraseResult = matchPhrase(spokenWords: spokenWords, startingNear: currentPosition),
+               phraseResult.score >= sensitivity {
                 bestMatchIndex = phraseResult.endIndex
                 bestScore = phraseResult.score
             }
         }
 
-        if bestScore >= sensitivity {
-            // Allow forward movement, or backward within a small window
-            if bestMatchIndex >= currentPosition || (currentPosition - bestMatchIndex) <= Constants.searchWindowBack {
-                currentPosition = bestMatchIndex
-                return bestMatchIndex
+        // ── 2) Single-word fallback with tighter window + forward bias ──
+        if bestMatchIndex == nil {
+            let lastSpoken = spokenWords.last!
+            let tightEnd = min(scriptWords.count - 1, currentPosition + Constants.maxStepForward)
+
+            for i in windowStart...tightEnd {
+                let scriptWord = scriptWords[i].normalized
+                var score = StringSimilarity.normalizedSimilarity(lastSpoken, scriptWord)
+
+                let offset = i - currentPosition
+                if offset >= 1 && offset <= 3 {
+                    score += 0.05
+                } else if offset < 0 {
+                    score *= 0.9
+                }
+
+                if score > bestScore && score >= sensitivity {
+                    bestScore = score
+                    bestMatchIndex = i
+                }
             }
         }
 
-        return nil
+        guard let matchIndex = bestMatchIndex else { return nil }
+
+        // ── 3) Gate large jumps — require consecutive confirmations ──
+        let jump = matchIndex - currentPosition
+        if abs(jump) > Constants.maxStepForward {
+            if candidatePosition == matchIndex {
+                candidateHits += 1
+            } else {
+                candidatePosition = matchIndex
+                candidateHits = 1
+            }
+            if candidateHits < Constants.confirmationsRequired {
+                return nil
+            }
+        }
+
+        currentPosition = matchIndex
+        resetCandidate()
+        return matchIndex
     }
 
     private struct PhraseMatch {
@@ -86,8 +114,15 @@ final class WordMatcher {
             let avgScore = totalScore / Double(comparisons)
             let endIdx = min(startIdx + comparisons - 1, scriptWords.count - 1)
 
-            if avgScore > (bestMatch?.score ?? 0) {
-                bestMatch = PhraseMatch(endIndex: endIdx, score: avgScore)
+            // Forward bias: slightly prefer matches that advance naturally
+            let offset = endIdx - position
+            var adjustedScore = avgScore
+            if offset >= 0 && offset <= Constants.maxStepForward {
+                adjustedScore += 0.02
+            }
+
+            if adjustedScore > (bestMatch?.score ?? 0) {
+                bestMatch = PhraseMatch(endIndex: endIdx, score: adjustedScore)
             }
         }
 
@@ -96,5 +131,11 @@ final class WordMatcher {
 
     func reset() {
         currentPosition = 0
+        resetCandidate()
+    }
+
+    private func resetCandidate() {
+        candidatePosition = nil
+        candidateHits = 0
     }
 }

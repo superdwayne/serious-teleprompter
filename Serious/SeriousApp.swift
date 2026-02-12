@@ -55,6 +55,7 @@ struct MenuBarContent: View {
 
         Button("Paste / Edit Script...") {
             openWindow(id: "script-editor")
+            NSApp.activate(ignoringOtherApps: true)
         }
 
         Button("Import Text File...") {

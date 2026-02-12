@@ -8,5 +8,7 @@
 	<string>Serious needs microphone access to follow your voice as you read the script.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Serious uses speech recognition to track your reading position and scroll the teleprompter automatically.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

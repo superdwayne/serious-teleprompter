@@ -92,8 +92,10 @@ final class TeleprompterViewModel {
             scrollState.isScrolling = true
             startSilenceMonitor()
 
+            var receivedAnyResult = false
             for await result in stream {
                 guard !Task.isCancelled else { break }
+                receivedAnyResult = true
                 lastTranscriptionTime = Date()
 
                 if scrollState.isPaused {
@@ -103,6 +105,13 @@ final class TeleprompterViewModel {
                 if let newIndex = wordMatcher.processTranscription(result) {
                     scrollState.advanceTo(newIndex)
                 }
+            }
+
+            if !Task.isCancelled && isTracking {
+                trackingError = receivedAnyResult
+                    ? "Voice tracking session ended — restarting may help"
+                    : "Could not start speech recognition — check microphone access"
+                isTracking = false
             }
         }
     }

@@ -26,6 +26,7 @@ final class LegacySpeechService: SpeechServiceProtocol, @unchecked Sendable {
     private var recognitionTask: SFSpeechRecognitionTask?
     private var audioEngine: AVAudioEngine?
     private var continuation: AsyncStream<TranscriptionResult>.Continuation?
+    private var sessionRestartTask: Task<Void, Never>?
 
     static func requestAuthorization() async -> Bool {
         await withCheckedContinuation { continuation in
@@ -50,18 +51,29 @@ final class LegacySpeechService: SpeechServiceProtocol, @unchecked Sendable {
     }
 
     private func startSession() {
+        guard let recognizer else {
+            continuation?.finish()
+            return
+        }
+
         let audioEngine = AVAudioEngine()
         self.audioEngine = audioEngine
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        if recognizer?.supportsOnDeviceRecognition == true {
+        if recognizer.supportsOnDeviceRecognition {
             request.requiresOnDeviceRecognition = true
         }
         self.recognitionRequest = request
 
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
+
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            continuation?.finish()
+            return
+        }
+
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
             request.append(buffer)
         }
@@ -69,10 +81,12 @@ final class LegacySpeechService: SpeechServiceProtocol, @unchecked Sendable {
         do {
             try audioEngine.start()
         } catch {
+            audioEngine.inputNode.removeTap(onBus: 0)
+            continuation?.finish()
             return
         }
 
-        recognitionTask = recognizer?.recognitionTask(with: request) { [weak self] result, error in
+        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self else { return }
 
             if let result {
@@ -92,8 +106,10 @@ final class LegacySpeechService: SpeechServiceProtocol, @unchecked Sendable {
     }
 
     private func scheduleSessionRestart() {
-        Task {
+        sessionRestartTask?.cancel()
+        sessionRestartTask = Task {
             try? await Task.sleep(for: .seconds(Constants.sfSpeechSessionLimit))
+            guard !Task.isCancelled else { return }
             restartSessionIfNeeded()
         }
     }
@@ -112,6 +128,8 @@ final class LegacySpeechService: SpeechServiceProtocol, @unchecked Sendable {
     }
 
     func stopTranscription() async {
+        sessionRestartTask?.cancel()
+        sessionRestartTask = nil
         continuation?.finish()
         continuation = nil
         audioEngine?.inputNode.removeTap(onBus: 0)
